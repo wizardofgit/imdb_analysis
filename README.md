@@ -1,11 +1,5 @@
 # IMDb movies analysis
-The aim of this project is to analyze a select set of movies, their directors, actors and so on, treating it as a complex network.
-
-# The structure
-The network is a 3-partite graph (movies, actors, directors).
+This project analyzes a select set of movies, their directors, actors, and so on, treating it as a complex network.
 
 # Dataset
-The data is directly aquired from IMDb database via IMDb API (https://imdb-api.com/).
-
-# The scope
-Only movies published in 2000 and later are taken under consideration.
+The data is directly acquired from the IMDb database (https://developer.imdb.com/non-commercial-datasets/).
