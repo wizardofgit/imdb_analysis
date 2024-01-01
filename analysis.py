@@ -1,17 +1,32 @@
 import os
+import numpy as np
 import requests
 import gzip
 from io import BytesIO
 import pandas as pd
+import networkx as nx
+import matplotlib.pyplot as plt
 
 
 class Analysis:
-    def __init__(self):
+    def __init__(self, directors=False, rating=False):
         self.titles = None
         self.ratings = None
         self.crew = None
         self.genres = None
         self.genres_combinations = None
+        self.network = None
+        self.directors = directors
+        self.rating = rating
+
+        # parameters for plotting data
+        self.params = {
+            'minimal_rating': 0.0,
+            'maximal_rating': 10.0,
+            'minimal_year': 0,
+            'maximal_year': 9999,
+            'minimal_count': 1000
+        }
 
         self._check_dataset_age()
         self._check_if_dataset_exists()
@@ -22,7 +37,7 @@ class Analysis:
         try:
             with open('dataset/timestamp.txt', 'r') as file:
                 timestamp = file.read()
-                if pd.Timestamp.now() - pd.Timestamp(timestamp) > pd.Timedelta(days=1):
+                if pd.Timestamp.now() - pd.Timestamp(timestamp) > pd.Timedelta(days=7):
                     print('Dataset is too old. Downloading a new one...')
                     self._check_if_dataset_exists(old=True)
         except FileNotFoundError:
@@ -51,7 +66,6 @@ class Analysis:
             os.remove('dataset/crew.tsv')
 
         print('Deleted existing dataset.')
-
         self._check_if_dataset_exists()
 
     def _download_data(self, url, destination):
@@ -68,18 +82,20 @@ class Analysis:
                     file.write(decompressed_data.read())
             print(f"Downloaded successfully.")
         else:
-            print(f"Failed to download the file. Status code: {response.status_code}")
+            raise Exception(f"An error occurred while downloading the dataset. Error code: {response.status_code}")
 
     def _read_data(self):
-        # read the data
         self.titles = pd.read_csv('dataset/titles.tsv', sep='\t')
-        self.ratings = pd.read_csv('dataset/ratings.tsv', sep='\t')
-        self.crew = pd.read_csv('dataset/crew.tsv', sep='\t')
+        if self.rating:
+            self.ratings = pd.read_csv('dataset/ratings.tsv', sep='\t')
+        if self.directors:
+            self.crew = pd.read_csv('dataset/crew.tsv', sep='\t')
 
     def _recalculate(self):
         self._count_genres()
         self._count_genre_combinations()
 
+    # TODO: add filtering by rating, year, etc.
     def _count_genres(self):
         # calculate the number of movies in each genre (one movie can have multiple genres)
         self.genres = {}
@@ -91,6 +107,7 @@ class Analysis:
                         self.genres[j] += 1
                     else:
                         self.genres[j] = 1
+        self.genres.pop('nan')
 
     def _count_genre_combinations(self):
         self.genres_combinations = {}
@@ -109,3 +126,28 @@ class Analysis:
                             self.genres_combinations[(i[j], i[k])] += 1
                         else:
                             self.genres_combinations[(i[k], i[j])] += 1
+
+    def run(self):
+        self.network = nx.Graph()
+        self._plot()
+
+    def _update_plot(self):
+        self._recalculate()
+        self._plot()
+
+    # TODO: make plotting more intelligible
+    # TODO: change edge labels to edges width
+    # TODO: add filtering top/last genres combinations
+    def _plot(self):
+        for genre, count in self.genres.items():
+            self.network.add_node(genre, label=f"{genre}:{count}")
+
+        for (genre1, genre2), count in self.genres_combinations.items():
+            if count >= self.params['minimal_count']:
+                self.network.add_edge(genre1, genre2, weight=count)
+
+        pos = nx.circular_layout(self.network)
+        nx.draw(self.network, pos=pos, with_labels=True)
+        nx.draw_networkx_edge_labels(self.network, pos=pos, edge_labels={(u, v): self.network[u][v]['weight'] for u, v in self.network.edges})
+        plt.draw()
+        plt.show()
