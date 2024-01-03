@@ -1,37 +1,40 @@
 import os
-import numpy as np
 import requests
 import gzip
 from io import BytesIO
 import pandas as pd
-import networkx as nx
-import matplotlib.pyplot as plt
+import pyvis
 
 
 class Analysis:
-    def __init__(self, directors=False, rating=False):
+    def __init__(self, directors=False, params=None):
         self.titles = None
-        self.ratings = None
         self.crew = None
         self.genres = None
         self.genres_combinations = None
-        self.network = None
+        self.network = pyvis.network.Network()
         self.directors = directors
-        self.rating = rating
 
-        # parameters for plotting data
-        self.params = {
-            'minimal_rating': 0.0,
-            'maximal_rating': 10.0,
-            'minimal_year': 0,
-            'maximal_year': 9999,
-            'minimal_count': 1000
-        }
+        if params is not None:
+            self.params = params
+        else:
+            # default parameters
+            self.params = {
+                'minimal_rating': 0.0,
+                'maximal_rating': 10.0,
+                'minimal_year': 0,
+                'maximal_year': 9999,
+                'minimal_count': 0,
+                'maximal_count': 9999999999,
+                'top': 0,
+                'last': 0
+            }
 
         self._check_dataset_age()
         self._check_if_dataset_exists()
         self._read_data()
-        self._recalculate()
+        self._count_genres()
+        self._count_genre_combinations()
 
     def _check_dataset_age(self):
         try:
@@ -43,9 +46,14 @@ class Analysis:
         except FileNotFoundError:
             print('Dataset does not have a timestamp.')
             self._check_if_dataset_exists(old=True)
+
     def _check_if_dataset_exists(self, old=False):
+        # if dataset folder does not exist, create it
+        if not os.path.exists('dataset'):
+            os.mkdir('dataset')
         # if at least one file in the folder does not exist or dataset is too old, download dataset
-        if not os.path.exists('dataset/titles.tsv') or not os.path.exists('dataset/ratings.tsv') or not os.path.exists('dataset/crew.tsv') or old:
+        if not os.path.exists('dataset/titles.tsv') or not os.path.exists('dataset/ratings.tsv') or not os.path.exists(
+                'dataset/crew.tsv') or old:
             # movies data
             self._download_data('https://datasets.imdbws.com/title.basics.tsv.gz', 'dataset/titles.tsv')
             # ratings data
@@ -68,7 +76,8 @@ class Analysis:
         print('Deleted existing dataset.')
         self._check_if_dataset_exists()
 
-    def _download_data(self, url, destination):
+    @staticmethod
+    def _download_data(url, destination):
         print(f"Downloading {url.split('/')[-1]}...")
         response = requests.get(url)
 
@@ -86,28 +95,40 @@ class Analysis:
 
     def _read_data(self):
         self.titles = pd.read_csv('dataset/titles.tsv', sep='\t')
-        if self.rating:
-            self.ratings = pd.read_csv('dataset/ratings.tsv', sep='\t')
+        self.ratings = pd.read_csv('dataset/ratings.tsv', sep='\t')
         if self.directors:
             self.crew = pd.read_csv('dataset/crew.tsv', sep='\t')
 
-    def _recalculate(self):
-        self._count_genres()
-        self._count_genre_combinations()
+        # merging the dataframes
+        self.titles = self.titles.merge(self.ratings, on='tconst')
 
-    # TODO: add filtering by rating, year, etc.
     def _count_genres(self):
-        # calculate the number of movies in each genre (one movie can have multiple genres)
         self.genres = {}
         for i in self.titles['genres']:
             i = str(i)
             if i != '\\N':
                 for j in i.split(','):
+                    if j not in self.genres:
+                        self.genres[j] = 1
+                    else:
+                        self.genres[j] += 1
+        if 'nan' in self.genres:
+            del self.genres['nan']
+
+        for index, row in self.titles.iterrows():
+            i = str(row['genres'])
+            if '\\N' in [str(row['startYear']), str(row['averageRating']), str(row['endYear']), str(row['genres'])]:
+                continue
+            if int(row['startYear']) < self.params['minimal_year'] or int(row['startYear']) > self.params[
+                'maximal_year']:
+                continue
+            elif float(row['averageRating']) < self.params['minimal_rating'] or float(row['averageRating']) > \
+                    self.params['maximal_rating']:
+                continue
+            else:
+                for j in i.split(','):
                     if j in self.genres:
                         self.genres[j] += 1
-                    else:
-                        self.genres[j] = 1
-        self.genres.pop('nan')
 
     def _count_genre_combinations(self):
         self.genres_combinations = {}
@@ -128,26 +149,34 @@ class Analysis:
                             self.genres_combinations[(i[k], i[j])] += 1
 
     def run(self):
-        self.network = nx.Graph()
         self._plot()
 
-    def _update_plot(self):
-        self._recalculate()
-        self._plot()
-
-    # TODO: make plotting more intelligible
-    # TODO: change edge labels to edges width
-    # TODO: add filtering top/last genres combinations
     def _plot(self):
         for genre, count in self.genres.items():
-            self.network.add_node(genre, label=f"{genre}:{count}")
+            self.network.add_node(genre, label=str(genre), value=count, title=str(count))
 
+        # sorting the combinations by count for top/last genres combinations
+        sorted_combinations = [x[0] for x in sorted(self.genres_combinations.items(), key=lambda x: x[1], reverse=True)]
+
+        # calculating top/last genres combinations and plotting
         for (genre1, genre2), count in self.genres_combinations.items():
-            if count >= self.params['minimal_count']:
-                self.network.add_edge(genre1, genre2, weight=count)
+            if count == 0:
+                continue
+            elif count < self.params['minimal_count']:
+                continue
+            elif count > self.params['maximal_count']:
+                continue
 
-        pos = nx.circular_layout(self.network)
-        nx.draw(self.network, pos=pos, with_labels=True)
-        nx.draw_networkx_edge_labels(self.network, pos=pos, edge_labels={(u, v): self.network[u][v]['weight'] for u, v in self.network.edges})
-        plt.draw()
-        plt.show()
+            if self.params['top'] == 0 and self.params['last'] == 0:
+                self.network.add_edge(genre1, genre2, weight=count, title=str(count), label=str(count))
+                continue
+
+            if self.params['top'] != 0 and (genre1, genre2) in sorted_combinations[:self.params['top']]:
+                self.network.add_edge(genre1, genre2, weight=count, title=str(count), label=str(count))
+            if self.params['last'] != 0 and (genre1, genre2) in sorted_combinations[-self.params['last']:]:
+                self.network.add_edge(genre1, genre2, weight=count, title=str(count), label=str(count))
+
+        self.network.toggle_physics(True)
+        self.network.force_atlas_2based(gravity=-20)
+        self.network.show_buttons(filter_=['physics'])
+        self.network.show('network.html', notebook=False)
