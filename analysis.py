@@ -7,13 +7,10 @@ import pyvis
 
 
 class Analysis:
-    def __init__(self, directors=False, params=None):
-        self.titles = None
-        self.crew = None
-        self.genres = None
-        self.genres_combinations = None
+    def __init__(self, params=None):
+        self.genres = {}
+        self.genres_combinations = {}
         self.network = pyvis.network.Network()
-        self.directors = directors
 
         if params is not None:
             self.params = params
@@ -27,14 +24,18 @@ class Analysis:
                 'minimal_count': 0,
                 'maximal_count': 9999999999,
                 'top': 0,
-                'last': 0
+                'last': 0,
+                'sampling': 0.5
             }
 
         self._check_dataset_age()
         self._check_if_dataset_exists()
         self._read_data()
+        start_time = pd.Timestamp.now()
+        self._filter_data()
         self._count_genres()
         self._count_genre_combinations()
+        print(f'Analysis took {(pd.Timestamp.now() - start_time)} and loaded {len(self.titles)} movies.')
 
     def _check_dataset_age(self):
         try:
@@ -58,8 +59,6 @@ class Analysis:
             self._download_data('https://datasets.imdbws.com/title.basics.tsv.gz', 'dataset/titles.tsv')
             # ratings data
             self._download_data('https://datasets.imdbws.com/title.ratings.tsv.gz', 'dataset/ratings.tsv')
-            # crew data
-            self._download_data('https://datasets.imdbws.com/title.crew.tsv.gz', 'dataset/crew.tsv')
 
             # write the current timestamp to a file
             with open('dataset/timestamp.txt', 'w') as file:
@@ -96,14 +95,28 @@ class Analysis:
     def _read_data(self):
         self.titles = pd.read_csv('dataset/titles.tsv', sep='\t')
         self.ratings = pd.read_csv('dataset/ratings.tsv', sep='\t')
-        if self.directors:
-            self.crew = pd.read_csv('dataset/crew.tsv', sep='\t')
 
-        # merging the dataframes
-        self.titles = self.titles.merge(self.ratings, on='tconst')
+        # merging the dataframes and sampling
+        self.titles = self.titles.merge(self.ratings, on='tconst').sample(frac=float(self.params['sampling']))
+
+    def _filter_data(self):
+        indices_to_drop = []
+        for index, row in self.titles.iterrows():
+            if '\\N' in [str(row['startYear']), str(row['averageRating']), str(row['startYear']), str(row['genres'])]:
+                indices_to_drop.append(index)
+                continue
+            elif int(row['startYear']) < self.params['minimal_year'] or int(row['startYear']) > self.params[
+                'maximal_year']:
+                indices_to_drop.append(index)
+                continue
+            elif float(row['averageRating']) < self.params['minimal_rating'] or float(row['averageRating']) > \
+                    self.params['maximal_rating']:
+                indices_to_drop.append(index)
+                continue
+        print(f'Dropped {len(indices_to_drop)} movies due to filtering.')
+        self.titles = self.titles.drop(indices_to_drop)
 
     def _count_genres(self):
-        self.genres = {}
         for i in self.titles['genres']:
             i = str(i)
             if i != '\\N':
@@ -115,23 +128,7 @@ class Analysis:
         if 'nan' in self.genres:
             del self.genres['nan']
 
-        for index, row in self.titles.iterrows():
-            i = str(row['genres'])
-            if '\\N' in [str(row['startYear']), str(row['averageRating']), str(row['endYear']), str(row['genres'])]:
-                continue
-            if int(row['startYear']) < self.params['minimal_year'] or int(row['startYear']) > self.params[
-                'maximal_year']:
-                continue
-            elif float(row['averageRating']) < self.params['minimal_rating'] or float(row['averageRating']) > \
-                    self.params['maximal_rating']:
-                continue
-            else:
-                for j in i.split(','):
-                    if j in self.genres:
-                        self.genres[j] += 1
-
     def _count_genre_combinations(self):
-        self.genres_combinations = {}
         # creating the combinations
         for i in range(0, len(self.genres.keys())):
             for j in range(i + 1, len(self.genres.keys())):
@@ -140,7 +137,7 @@ class Analysis:
         for i in self.titles['genres']:
             i = str(i).split(',')
             if len(i) > 1:
-                # creating possible genre combinations
+                # creating possible genre combinations from the dataset entries
                 for j in range(0, len(i)):
                     for k in range(j + 1, len(i)):
                         if (i[j], i[k]) in self.genres_combinations:

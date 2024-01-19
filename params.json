@@ -2,11 +2,12 @@
     "params": {
         "minimal_rating": 0.0,
         "maximal_rating": 10.0,
-        "minimal_year": 2000,
+        "minimal_year": 0,
         "maximal_year": 9999,
-        "minimal_count": 0,
+        "minimal_count": 1000,
         "maximal_count": 9999999999,
         "top": 10,
-        "last": 0
+        "last": 0,
+        "sampling": 0.5
     }
 }
