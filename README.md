@@ -1,5 +1,5 @@
 # IMDb movies analysis
-This project analyzes a select set of movies in regard to their genres treating it as a complex network.
+This project analyzes a select set of series in regard to their genres treating it as a complex network.
 
 # Dataset
 The data is directly acquired from the IMDb database (https://developer.imdb.com/non-commercial-datasets/).
